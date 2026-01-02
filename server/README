@@ -1,0 +1,13 @@
+Server protocol quick reference:
+-TCP port 0xC10E (49422) by default.
+-Data from the server comes in continuous frames with the following layout:
++-----------------------------------------------+
+| 1 byte     | 3 bytes  | 4 bytes     | X bytes |
+| FRAME TYPE | RESERVED | DATA LENGTH | DATA    |
++-----------------------------------------------+
+-Data sent to the server should have the same format.
+-Integers will never use the sign bit so they can be treated as signed or unsigned.
+-0xFF... (-1) may be used to indicate an invalid value where 0 would not be appropriate.
+-Endianness depends on the server architecture (sorry). So probably little endian.
+-The category can be predicted by the card ID. If there are 7 cards in category 0, card ID 6 belongs to category 0, and card ID 7 belongs to category 1.
+-For all frame types, see src/frames.h.

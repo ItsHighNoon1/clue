@@ -1,0 +1,26 @@
+49422
+
+Miss Scarlett
+Colonel Mustard
+Mrs. White
+Reverend Green
+Mrs. Peacock
+Professor Plum
+
+Candlestick
+Dagger
+Lead Pipe
+Revolver
+Rope
+Wrench
+
+Hall
+Lounge
+Dining Room
+Kitchen
+Ballroom
+Conservatory
+Billiard Room
+Library
+Study
+

@@ -1,0 +1,134 @@
+Started server on port 49422
+
+Category 0 (6 cards)
+Miss Scarlett
+Colonel Mustard
+Mrs. White
+Reverend Green
+Mrs. Peacock
+Professor Plum
+
+Category 1 (6 cards)
+Candlestick
+Dagger
+Lead Pipe
+Revolver
+Rope
+Wrench
+
+Category 2 (9 cards)
+Hall
+Lounge
+Dining Room
+Kitchen
+Ballroom
+Conservatory
+Billiard Room
+Library
+Study
+
+Waiting for players...
+Randy connected from ::1 19096
+Randy connected from ::1 23192
+Randy connected from ::1 23704
+
+Starting game
+Solution: (1) Colonel Mustard, (8) Lead Pipe, (12) Hall
+(2) Randy's hand:
+  (5) Professor Plum
+  (6) Candlestick
+  (7) Dagger
+  (11) Wrench
+  (14) Dining Room
+  (17) Conservatory
+(0) Randy's hand:
+  (2) Mrs. White
+  (3) Reverend Green
+  (4) Mrs. Peacock
+  (9) Revolver
+  (16) Ballroom
+  (18) Billiard Room
+(1) Randy's hand:
+  (0) Miss Scarlett
+  (10) Rope
+  (13) Lounge
+  (15) Kitchen
+  (19) Library
+  (20) Study
+(2) Randy's turn
+(2) Randy suggests: (0) Miss Scarlett, (8) Lead Pipe, (15) Kitchen
+(0) Randy passed
+(1) Randy is obligated to show
+(1) Randy shows (0) Miss Scarlett
+(0) Randy's turn
+(0) Randy suggests: (1) Colonel Mustard, (6) Candlestick, (15) Kitchen
+(1) Randy is obligated to show
+(1) Randy shows (15) Kitchen
+(1) Randy's turn
+(1) Randy suggests: (0) Miss Scarlett, (7) Dagger, (20) Study
+(2) Randy is obligated to show
+(2) Randy shows (7) Dagger
+(2) Randy's turn
+(2) Randy suggests: (5) Professor Plum, (7) Dagger, (16) Ballroom
+(0) Randy is obligated to show
+(0) Randy shows (16) Ballroom
+(0) Randy's turn
+(0) Randy suggests: (3) Reverend Green, (8) Lead Pipe, (17) Conservatory
+(1) Randy passed
+(2) Randy is obligated to show
+(2) Randy shows (17) Conservatory
+(1) Randy's turn
+(1) Randy suggests: (1) Colonel Mustard, (10) Rope, (14) Dining Room
+(2) Randy is obligated to show
+(2) Randy shows (14) Dining Room
+(2) Randy's turn
+(2) Randy suggests: (0) Miss Scarlett, (10) Rope, (19) Library
+(0) Randy passed
+(1) Randy is obligated to show
+(1) Randy shows (10) Rope
+(0) Randy's turn
+(0) Randy suggests: (0) Miss Scarlett, (11) Wrench, (17) Conservatory
+(1) Randy is obligated to show
+(1) Randy shows (0) Miss Scarlett
+(1) Randy's turn
+(1) Randy suggests: (4) Mrs. Peacock, (10) Rope, (16) Ballroom
+(2) Randy passed
+(0) Randy is obligated to show
+(0) Randy shows (16) Ballroom
+(2) Randy's turn
+(2) Randy suggests: (1) Colonel Mustard, (6) Candlestick, (13) Lounge
+(0) Randy passed
+(1) Randy is obligated to show
+(1) Randy shows (13) Lounge
+(0) Randy's turn
+(0) Randy suggests: (4) Mrs. Peacock, (10) Rope, (14) Dining Room
+(1) Randy is obligated to show
+(1) Randy shows (10) Rope
+(1) Randy's turn
+(1) Randy suggests: (5) Professor Plum, (7) Dagger, (20) Study
+(2) Randy is obligated to show
+(2) Randy shows (7) Dagger
+(2) Randy's turn
+(2) Randy suggests: (1) Colonel Mustard, (11) Wrench, (19) Library
+(0) Randy passed
+(1) Randy is obligated to show
+(1) Randy shows (19) Library
+(0) Randy's turn
+(0) Randy suggests: (4) Mrs. Peacock, (9) Revolver, (14) Dining Room
+(1) Randy passed
+(2) Randy is obligated to show
+(2) Randy shows (14) Dining Room
+(1) Randy's turn
+(1) Randy suggests: (1) Colonel Mustard, (11) Wrench, (19) Library
+(2) Randy is obligated to show
+(2) Randy shows (11) Wrench
+(2) Randy's turn
+(2) Randy attempted to solve: (1) Colonel Mustard, (11) Wrench, (12) Hall
+(2) Randy was eliminated
+(0) Randy's turn
+(0) Randy attempted to solve: (4) Mrs. Peacock, (7) Dagger, (15) Kitchen
+(0) Randy was eliminated
+(1) Randy's turn
+(1) Randy attempted to solve: (5) Professor Plum, (9) Revolver, (18) Billiard Room
+(1) Randy was eliminated
+Aborting game with reason: All players eliminated

@@ -1,0 +1,5 @@
+The build script will look for directories in this directory that contain a file called build.sh.
+That script will be run as part of the build.
+
+See ../server/README for information about the network protocol.
+See randy/ for an example of a bot that does nothing but play the game randomly.
