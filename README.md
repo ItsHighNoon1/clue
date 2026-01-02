@@ -6,11 +6,11 @@ The classic board game [Clue](https://en.wikipedia.org/wiki/Cluedo), played by c
 
 For years I have been fascinated by computers playing games against each other. Almost 11 years ago (wow!) I was browsing StackOverflow and found [this gem of a question](https://codegolf.stackexchange.com/questions/42924/image-battle-of-colours) which pitted algorithms against eachother to fill an image with as much of their color as possible. I love this question because the game is so visual for humans to watch and the submissions use some really clever techniques to break down the problem without blowing the CPU budget.
 
-I also have a love for mathematical games, which I share with my father. Family game night would often turn into "what is the highest score hand in [Five Crowns](https://en.wikipedia.org/wiki/Five_Crowns_(card_game))?", "how many cards do you need to guarantee a [SET](https://en.wikipedia.org/wiki/Set_(card_game))?" and, naturally, "what is the best strategy for Clue?"
+I also have a love for mathematical games, which I share with my father. Family game night would often turn into "what is the highest score hand in [Five Crowns](https://en.wikipedia.org/wiki/Five_Crowns_(card_game))?" "how many cards do you need to guarantee a [SET](https://en.wikipedia.org/wiki/Set_(card_game))?" and, naturally, "what is the best strategy for Clue?"
 
 When the questions get too complicated, we talk about running simulations. Thus, this project. A testbed where bots can play Clue, so we can finally settle what the optimal Clue strategy is once and for all.
 
-See `first_ever_game.txt` for the server output from first game that finished without some terrible malfunction.
+See `server/first_ever_game.txt` for the server output from first game that finished without some terrible malfunction.
 
 ## Building
 
