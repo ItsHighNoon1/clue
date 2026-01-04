@@ -3,24 +3,23 @@
  * idiomatic instead of just throwing a bunch of unwraps everywhere
  */
 
-use std::{io::BufRead, net::Ipv6Addr};
+mod frames;
 
-struct Card {
-    id: i16,
-    name: String,
-}
+use std::{io::BufRead};
+use frames::Card;
 
 struct Player<'a> {
-    stream: std::net::TcpStream,
+    in_stream: std::io::BufReader<std::net::TcpStream>,
+    out_stream: std::io::BufWriter<std::net::TcpStream>,
     address: std::net::SocketAddr,
     eliminated: bool,
+    autoplay: bool,
     id: i8,
     name: String,
     hand: Vec<&'a Card>,
 }
 
 struct Lobby<'a> {
-    thread: Option<std::thread::JoinHandle<()>>,
     players: Vec<Player<'a>>,
     solution: Vec<&'a Card>,
 }
@@ -40,10 +39,16 @@ fn main() -> Result<(), String> {
         Some(string) => string,
         None => return Err(String::from("Usage: ./server [settings file]")),
     };
-    let settings = read_settings(settings_path)?;
+    let settings = std::sync::Arc::new(read_settings(settings_path)?);
+
+    // Create the rules frame which we will send to everyone when they join
+    let mut rules_frame = frames::RulesFrame {
+        player_id: 0,
+        cards: settings.cards.to_vec(),
+    };
     
     // Continuously create lobbies
-    let listener = match std::net::TcpListener::bind(std::net::SocketAddr::from((Ipv6Addr::UNSPECIFIED, settings.port))) {
+    let listener = match std::net::TcpListener::bind(std::net::SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, settings.port))) {
         Ok(socket) => socket,
         Err(error) => return Err(error.to_string()),
     };
@@ -51,45 +56,63 @@ fn main() -> Result<(), String> {
         Ok(_) => (),
         Err(error) => return Err(error.to_string()),
     }
-    let mut lobbies: Vec<Lobby> = Vec::new();
-    loop {
-        // Clean up finished lobbies
-        while let Some(index) = lobbies.iter().position(|lobby| match &lobby.thread {
-            Some(thread) => thread.is_finished(),
-            None => false, // Have not started this lobby
-        }) {
-            let finished_lobby = lobbies.remove(index);
-            let _ = finished_lobby.thread.unwrap().join();
-            println!("Cleaned up a lobby");
-        }
 
+    loop {
         // Try to create a new lobby
         println!("Creating new lobby {}", listener.local_addr().unwrap());
+        rules_frame.player_id = 0;
         let mut lobby = Lobby {
-            thread: None,
             players: Vec::new(),
             solution: Vec::new(),
         };
-        let mut player_index = 0;
         let mut timeout_start: Option<std::time::Instant> = None;
         while lobby.players.len() < settings.lobby_size.try_into().unwrap() {
             // Wait for players
             match listener.accept() {
                 Ok(connection) => {
-                    println!("got a connection: {}", connection.1);
-                    lobby.players.push(Player {
-                        stream: connection.0,
-                        address: connection.1,
-                        eliminated: false,
-                        id: player_index,
-                        name: String::from("Test"),
-                        hand: Vec::new(),
-                    });
-                    player_index += 1;
+                    if settings.timeout == 0 {
+                        if let Err(error) = connection.0.set_read_timeout(None) {
+                            println!("Failed to set timeout: {}", error.to_string());
+                        }
+                    } else {
+                        if let Err(error) = connection.0.set_read_timeout(Some(std::time::Duration::new(settings.timeout as u64, 0))) {
+                            println!("Failed to set timeout: {}", error.to_string());
+                        }
+                    }
+                    match connection.0.try_clone() {
+                        Ok(cloned_stream) => {
+                            let mut in_stream = std::io::BufReader::new(connection.0);
+                            let mut out_stream = std::io::BufWriter::new(cloned_stream);
+                            match frames::expect_frame::<frames::ConnectFrame>(&mut in_stream) {
+                                Ok(connect_frame) => {
+                                    let new_player = Player {
+                                        in_stream: in_stream,
+                                        out_stream: out_stream,
+                                        address: connection.1,
+                                        eliminated: false,
+                                        autoplay: false,
+                                        id: rules_frame.player_id,
+                                        name: connect_frame.name,
+                                        hand: Vec::new(),
+                                    };
+                                    //frames::send_frame(&mut new_player.out_stream, &rules_frame);
+                                    println!("{} connected", new_player.name);
+                                    rules_frame.player_id += 1;
+                                    lobby.players.push(new_player);
+                                }
+                                Err(error) => {
+                                    let _ = frames::send_frame(&mut out_stream, &frames::DebugFrame { message: error.to_string() });
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            eprintln!("Failed to clone stream for {}", connection.1);
+                            continue;
+                        }
+                    }
                 }
                 Err(_) => {
                     std::thread::sleep(std::time::Duration::new(1, 0));
-                    continue;
                 }
             }
 
@@ -98,9 +121,9 @@ fn main() -> Result<(), String> {
                 break;
             }
 
-            // If there are more than 2 players, start the game start timer
-            if lobby.players.len() >= 2 {
-                println!("2 players joined, start timeout timer");
+            // If there are more than 2 players, start the game start timer (if we want one)
+            if lobby.players.len() >= 2 && settings.lobby_wait > 0 && timeout_start.is_none() {
+                println!("Started lobby timeout");
                 timeout_start = Some(std::time::Instant::now());
             }
             match timeout_start {
@@ -113,16 +136,20 @@ fn main() -> Result<(), String> {
             }
         }
 
-        println!("Starting lobby");
-        lobbies.push(lobby);
-        run_lobby(lobbies.last_mut().unwrap(), &settings);
+        // Create a thread to handle this lobby so the main thread can work on another
+        let thread_settings = settings.clone();
+        std::thread::spawn(move || {
+            run_lobby(&mut lobby, thread_settings.as_ref());
+        });
     }
 }
 
 fn run_lobby(lobby: &mut Lobby, settings: &Settings) {
-    lobby.thread = Some(std::thread::spawn(move || {
-
-    }));
+    println!("got here");
+    let test = frames::DebugFrame {
+        message: String::from("TEST"),
+    };
+    frames::send_frame(&mut lobby.players.get_mut(0).unwrap().out_stream, &test);
 }
 
 fn read_settings(path: &String) -> Result<Settings, String> {
