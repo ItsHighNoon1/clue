@@ -282,7 +282,7 @@ int open_socket(uint16_t port) {
     }
     struct sockaddr_in6 socket_address = {
         AF_INET6, // sin6_family
-        port, // sin6_port
+        htons(port), // sin6_port
         0, // sin6_flowinfo
         IN6ADDR_ANY_INIT, // sin6_addr
         0 // sin6_scope_id

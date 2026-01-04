@@ -84,7 +84,7 @@ int connect_to_server(char** argv) {
 
     struct sockaddr_in6 address = {};
     address.sin6_family = AF_INET6;
-    address.sin6_port = atoi(argv[2]);
+    address.sin6_port = htons(atoi(argv[2]));
     if (address.sin6_port == 0) {
         printf("%s not a valid port\n", argv[2]);
         exit(1);
