@@ -1,5 +1,10 @@
+# The first line has to be the port number
 49422
+3
+4
+10
 
+# The first blank line indicates that we are entering the card names
 Miss Scarlett
 Colonel Mustard
 Mrs. White
@@ -7,6 +12,7 @@ Reverend Green
 Mrs. Peacock
 Professor Plum
 
+# Blank lines afterward separate categories
 Candlestick
 Dagger
 Lead Pipe
