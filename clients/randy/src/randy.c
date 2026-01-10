@@ -52,7 +52,7 @@ int main(int argc, char** argv) {
     ConnectFrame_t connect_frame;
     connect_frame.name_length = strlen(NAME);
     header.type = FRAME_TYPE_CONNECT;
-    header.data_length = sizeof(connect_frame) + strlen(NAME);
+    header.data_length = htonl(sizeof(connect_frame) + strlen(NAME));
 
     send(fd, &header, sizeof(header), MSG_DONTWAIT); // Send header
     send(fd, &connect_frame, sizeof(connect_frame), MSG_DONTWAIT); // Send connect frame header
@@ -60,6 +60,7 @@ int main(int argc, char** argv) {
 
     while (1) {
         int data_length = recv(fd, &header, sizeof(header), MSG_WAITALL);
+        header.data_length = ntohl(header.data_length);
         if (data_length < sizeof(header)) {
             if (data_length == -1 && errno == EAGAIN) {
                 continue;
@@ -67,7 +68,7 @@ int main(int argc, char** argv) {
                 perror(NULL);
                 exit(1);
             }
-            printf("Server sent incomplete frame\n");
+            printf("Server sent incomplete frame %d\n", data_length);
             break;
         }
         handle_frame(&header, fd); // This consumes the rest of the stream
@@ -135,25 +136,25 @@ void handle_frame(Frame_t* header, int fd) {
     if (header->type == FRAME_TYPE_ERROR) {
         // Server sends this to us when we mess up. Print
         ErrorFrame_t* error = (ErrorFrame_t*)buffer;
-        printf("Server reported error: %.*s\n", error->error_length, error->error);
+        printf("Server reported error: %.*s\n", ntohl(error->error_length), error->error);
         exit(1);
     } else if (header->type == FRAME_TYPE_ABORT) {
         // Server sends this to us when it messes up. Print
         AbortFrame_t* abort = (AbortFrame_t*)buffer;
-        printf("Server aborted: %.*s\n", abort->error_length, abort->error);
+        printf("Server aborted: %.*s\n", ntohl(abort->error_length), abort->error);
         exit(0);
     } else if (header->type == FRAME_TYPE_RULES) {
         // Populate our knowledge with what we can
         RulesFrame_t* rules = (RulesFrame_t*)buffer;
         knowledge.player_id = rules->player_id;
-        knowledge.total_cards = rules->num_cards;
+        knowledge.total_cards = ntohs(rules->num_cards);
         knowledge.num_categories = rules->num_categories;
         knowledge.num_cards_in_category = malloc(knowledge.num_categories * sizeof(int));
         int16_t* num_cards_in_category = (int16_t*)&rules->num_cards_in_category;
         for (int i = 0; i < knowledge.num_categories; i++) {
-            knowledge.num_cards_in_category[i] = num_cards_in_category[i];
+            knowledge.num_cards_in_category[i] = ntohs(num_cards_in_category[i]);
         }
-        char* card_name_data = (char*)num_cards_in_category + rules->num_categories * sizeof(int16_t) + rules->num_cards * sizeof(int16_t);
+        char* card_name_data = (char*)num_cards_in_category + rules->num_categories * sizeof(int16_t);
         knowledge.card_names = malloc(knowledge.total_cards * sizeof(char*));
         for (int i = 0; i < knowledge.total_cards; i++) {
             int card_name_length = *card_name_data;
@@ -163,16 +164,16 @@ void handle_frame(Frame_t* header, int fd) {
             knowledge.card_names[i][card_name_length] = '\0';
             card_name_data += card_name_length;
         }
-        printf("Connected as player %d, %d categories, %d cards\n", rules->player_id, rules->num_categories, rules->num_cards);
+        printf("Connected as player %d, %d categories, %d cards\n", rules->player_id, rules->num_categories, ntohs(rules->num_cards));
     } else if (header->type == FRAME_TYPE_START) {
         // Since we are playing randomly, we don't care about the meta information, just our hand
         StartFrame_t* start = (StartFrame_t*)buffer;
-        knowledge.hand_size = start->your_hand_size;
+        knowledge.hand_size = htons(start->your_hand_size);
         knowledge.hand = malloc(knowledge.hand_size * sizeof(int));
         int16_t* my_hand = (int16_t*)&start->your_hand;
         printf("I got dealt:\n");
         for (int i = 0; i < knowledge.hand_size; i++) {
-            knowledge.hand[i] = my_hand[i];
+            knowledge.hand[i] = htons(my_hand[i]);
             assert(knowledge.card_names != NULL);
             printf("  %s\n", knowledge.card_names[knowledge.hand[i]]);
         }

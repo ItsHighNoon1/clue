@@ -47,9 +47,6 @@ typedef struct {
     int16_t num_cards; // The total number of cards in the game.
     int16_t num_cards_in_category[0]; // The number of cards in each category. Length <num_categories>
     struct {
-        int16_t cards[0]; // The card ID. Length <num_cards_in_category[category]>
-    } categories[0]; // Length <num_categories>
-    struct {
         // Flavor text names for the cards. Can be ignored
         int8_t name_length;
         char name[0];
