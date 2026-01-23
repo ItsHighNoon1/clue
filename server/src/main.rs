@@ -19,6 +19,11 @@ struct Player {
     name: String,
     hand: Vec<Card>,
 }
+impl Player {
+    fn to_json(&self) -> String {
+        return format!("{{\"ip\":\"{}\",\"name\":\"{}\"}}", self.address.ip().to_string(), self.name);
+    }
+}
 impl Clone for Player {
     fn clone(&self) -> Self {
         return Player {
@@ -43,6 +48,8 @@ struct Settings {
     timeout: i8,
     lobby_size: i8,
     lobby_wait: i8,
+    endpoint: String,
+    password: String,
     cards: Vec<Vec<Card>>,
 }
 
@@ -73,7 +80,6 @@ fn main() -> Result<(), String> {
 
     loop {
         // Try to create a new lobby
-        println!("Creating new lobby {}", listener.local_addr().unwrap());
         rules_frame.player_id = 0;
         let mut lobby = Lobby {
             players: Vec::new(),
@@ -129,7 +135,6 @@ fn main() -> Result<(), String> {
 
             // If there are more than 2 players, start the game start timer (if we want one)
             if lobby.players.len() >= 2 && settings.lobby_wait > 0 && timeout_start.is_none() {
-                println!("Started lobby timeout");
                 timeout_start = Some(std::time::Instant::now());
             }
             match timeout_start {
@@ -143,6 +148,7 @@ fn main() -> Result<(), String> {
         }
 
         // Create a thread to handle this lobby so the main thread can work on another
+        println!("Creating lobby with above players");
         let thread_settings = settings.clone();
         std::thread::spawn(move || {
             run_lobby(&mut lobby, thread_settings.as_ref());
@@ -223,6 +229,7 @@ fn run_lobby(lobby: &mut Lobby, settings: &Settings) {
             for player in lobby.players.iter_mut() {
                 let _ = frames::send_frame(&mut player.stream, &game_end_frame);
             }
+            winning_player = Some(lobby.players.iter().find(|player| player.id == not_eliminated).unwrap().clone());
             break;
         }
 
@@ -244,7 +251,6 @@ fn run_lobby(lobby: &mut Lobby, settings: &Settings) {
         }
 
         // Notify everyone it is this player's turn
-        println!("player {} turn", current_player.id);
         let turn_start_frame = frames::TurnFrame {
             player_id: current_player.id,
         };
@@ -348,7 +354,7 @@ fn run_lobby(lobby: &mut Lobby, settings: &Settings) {
         let mut queried_player_idx = (turn_idx + 1) % lobby.players.len() as i32;
         while queried_player_idx != turn_idx {
             // Tell everyone that someone is under the gun
-            let mut queried_player = lobby.players.get_mut(turn_idx as usize).unwrap().clone();
+            let mut queried_player = lobby.players.get_mut(queried_player_idx as usize).unwrap().clone();
             let query_frame = frames::ActionFrame {
                 player_id: current_player.id,
                 responder_id: queried_player.id,
@@ -361,16 +367,18 @@ fn run_lobby(lobby: &mut Lobby, settings: &Settings) {
 
             // Queried player needs to respond
             let mut player_chosen_card = -1;
-            if let Ok(reply_frame) = frames::expect_frame::<frames::ReplyFrame>(&mut queried_player.stream) {
-                player_chosen_card = reply_frame.card;
-            } else {
-                // Probably timed out, automate
-                let autoplay_reason_frame = frames::DebugFrame {
-                    message: String::from("Set to autoplay due to timeout on query"),
-                };
-                let _ = frames::send_frame(&mut queried_player.stream, &autoplay_reason_frame);
-                lobby.players.get_mut(turn_idx as usize).unwrap().autoplay = true;
-                queried_player.autoplay = true;
+            if !queried_player.autoplay {
+                if let Ok(reply_frame) = frames::expect_frame::<frames::ReplyFrame>(&mut queried_player.stream) {
+                    player_chosen_card = reply_frame.card;
+                } else {
+                    // Probably timed out, automate
+                    let autoplay_reason_frame = frames::DebugFrame {
+                        message: String::from("Set to autoplay due to timeout on query"),
+                    };
+                    let _ = frames::send_frame(&mut queried_player.stream, &autoplay_reason_frame);
+                    lobby.players.get_mut(turn_idx as usize).unwrap().autoplay = true;
+                    queried_player.autoplay = true;
+                }
             }
 
             // First question... was the player obligated to respond?
@@ -381,7 +389,7 @@ fn run_lobby(lobby: &mut Lobby, settings: &Settings) {
                     break;
                 }
             }
-            if response_card != None {
+            if response_card.is_some() {
                 // Player is obligated to respond, did they respond legally?
                 if !suggestion.contains(&player_chosen_card) {
                     // Responded with a card that wasn't suggested
@@ -414,12 +422,24 @@ fn run_lobby(lobby: &mut Lobby, settings: &Settings) {
             }
 
             // Send the reply to all players
-            let reply_frame = frames::ReplyFrame {
+            let reply_frame_real = frames::ReplyFrame {
                 player_id: queried_player.id,
                 card: response_card.unwrap_or(-1),
             };
+            let reply_frame_broadcast = frames::ReplyFrame {
+                player_id: queried_player.id,
+                card: if response_card.is_some() { 0 } else { -1 },
+            };
             for player in lobby.players.iter_mut() {
-                let _ = frames::send_frame(&mut player.stream, &reply_frame);
+                if player.id == current_player.id || player.id == queried_player.id {
+                    let _ = frames::send_frame(&mut player.stream, &reply_frame_real);
+                } else {
+                    let _ = frames::send_frame(&mut player.stream, &reply_frame_broadcast);
+                }
+            }
+
+            if response_card.is_some() {
+                break;
             }
 
             // Go next
@@ -428,7 +448,57 @@ fn run_lobby(lobby: &mut Lobby, settings: &Settings) {
     }
 
     // Wrap up the lobby
-    println!("shutting down lobby");
+    let _ = wrap_up_lobby(lobby, settings, winning_player);
+}
+
+fn wrap_up_lobby(lobby: &mut Lobby, settings: &Settings, winning_player: Option<Player>) {
+    // Shut down streams if they are still open
+    for player in lobby.players.iter_mut() {
+        let _ = player.stream.shutdown(std::net::Shutdown::Both);
+    }
+
+    if let Some(winner) = &winning_player {
+        println!("Lobby ended with {} winning", winner.name);
+    } else {
+        println!("Lobby ended with no winner");
+    }
+
+    if settings.endpoint.is_empty() {
+        // If no endpoint, we are done
+        return;
+    }
+
+    // Else, report the results of this game to the leaderboard
+    let client = reqwest::blocking::Client::new();
+    let losing_player_jsons: Vec<String> = lobby.players.iter().filter_map(|player| {
+        if let Some(winner) = winning_player.as_ref() {
+            if winner.id == player.id {
+                return None;
+            } else {
+                return Some(player.to_json());
+            }
+        } else {
+            return Some(player.to_json());
+        }
+    }).collect();
+    let losing_player_json_array = format!("[{}]", losing_player_jsons.join(","));
+    let mut request_body = std::collections::HashMap::new();
+    if let Some(winner) = winning_player {
+        request_body.insert("winner", winner.to_json());
+    }
+    request_body.insert("losers", losing_player_json_array);
+    match client.post(&settings.endpoint).json(&request_body).header("Authorization", &settings.password).send() {
+        Ok(res) => {
+            if res.status().is_success() {
+                println!("Successfully saved lobby result");
+            } else {
+                println!("HTTP {}: {}", res.status().to_string(), res.text().unwrap_or(String::from("<empty>")));
+            }
+        }
+        Err(err) => {
+            println!("HTTP error submitting scores: {}", err.to_string());
+        }
+    }
 }
 
 fn read_settings(path: &String) -> Result<Settings, String> {
@@ -437,6 +507,8 @@ fn read_settings(path: &String) -> Result<Settings, String> {
         Timeout,
         LobbySize,
         LobbyWait,
+        Endpoint,
+        Password,
         Cards,
     }
 
@@ -446,6 +518,8 @@ fn read_settings(path: &String) -> Result<Settings, String> {
         timeout: 3,
         lobby_size: 4,
         lobby_wait: 10,
+        endpoint: String::from(""),
+        password: String::from(""),
         cards: Vec::new(),
     };
 
@@ -497,6 +571,14 @@ fn read_settings(path: &String) -> Result<Settings, String> {
                     Ok(int) => int,
                     Err(error) => return Err(error.to_string()),
                 };
+                state = SettingsFileState::Endpoint;
+            }
+            SettingsFileState::Endpoint => {
+                settings.endpoint = String::from(line.as_str());
+                state = SettingsFileState::Password;
+            }
+            SettingsFileState::Password => {
+                settings.password = String::from(line.as_str());
                 state = SettingsFileState::Cards;
             }
             SettingsFileState::Cards => {

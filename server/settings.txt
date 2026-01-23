@@ -3,6 +3,8 @@
 3
 4
 10
+endpoint
+password
 
 # The first blank line indicates that we are entering the card names
 Miss Scarlett

@@ -442,10 +442,10 @@ impl Frame<ActionFrame> for ActionFrame {
         if bytes.len() < 4 {
             return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "Incomplete action frame"));
         }
-        let num_cards = bytes.len() / 2 - 1;
+        let num_cards = (bytes.len() - 4) / 2 ;
         let mut cards = Vec::new();
         for card_idx in 0..num_cards {
-            let card_big_endian: [u8; 2] = [bytes[2 + card_idx * 2], bytes[2 + card_idx * 2 + 1]];
+            let card_big_endian: [u8; 2] = [bytes[4 + card_idx * 2], bytes[4 + card_idx * 2 + 1]];
             let card = i16::from_be_bytes(card_big_endian);
             if card < 0 {
                 return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Card ID out of bounds"));
@@ -488,7 +488,7 @@ impl Frame<ReplyFrame> for ReplyFrame {
         }
         let card_big_endian: [u8; 2] = [bytes[2], bytes[3]];
         let card = i16::from_be_bytes(card_big_endian);
-        if card < 0 {
+        if card < 0 && card != -1 {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Card ID out of bounds"));
         }
         return Ok(ReplyFrame {

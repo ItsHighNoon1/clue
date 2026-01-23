@@ -174,7 +174,6 @@ void handle_frame(Frame_t* header, int fd) {
         }
     } else if (header->type == FRAME_TYPE_TURN) {
         TurnFrame_t* turn = (TurnFrame_t*)buffer;
-        printf("%d turn\n", turn->player_id);
         if (turn->player_id == knowledge.player_id) {
             // It is our turn
             printf("My turn\n");
@@ -199,8 +198,10 @@ void handle_frame(Frame_t* header, int fd) {
                 printf("(%d) %s, ", ntohs(suggestion->suggestion[i]), knowledge.card_names[ntohs(suggestion->suggestion[i])]);
             }
             printf("\n");
+            int data_len = suggestion_header.data_length;
+            suggestion_header.data_length = ntohl(data_len);
             send(fd, &suggestion_header, sizeof(suggestion_header), MSG_DONTWAIT);
-            send(fd, suggestion, suggestion_header.data_length, MSG_DONTWAIT);
+            send(fd, suggestion, data_len, MSG_DONTWAIT);
             free(suggestion);
         }
     } else if (header->type == FRAME_TYPE_ACTION) {
@@ -227,7 +228,17 @@ void handle_frame(Frame_t* header, int fd) {
                 }
             }
             if (num_cards_held == 0) {
-                // We don't need to pass, the server will do it for us
+                // We still need to send a bogus frame
+                ReplyFrame_t query_response = {};
+                query_response.card_id = -1;
+                Frame_t query_response_header = {};
+                query_response_header.type = FRAME_TYPE_REPLY;
+                query_response_header.data_length = sizeof(query_response);
+                printf("I have nothing\n");
+                int data_len = query_response_header.data_length;
+                query_response_header.data_length = ntohl(data_len);
+                send(fd, &query_response_header, sizeof(query_response_header), MSG_DONTWAIT);
+                send(fd, &query_response, data_len, MSG_DONTWAIT);
             } else {
                 // Now we can be random
                 ReplyFrame_t query_response = {};
@@ -235,11 +246,16 @@ void handle_frame(Frame_t* header, int fd) {
                 Frame_t query_response_header = {};
                 query_response_header.type = FRAME_TYPE_REPLY;
                 query_response_header.data_length = sizeof(query_response);
-                printf("I am responding with (%d) %s\n", query_response.card_id, knowledge.card_names[ntohs(query_response.card_id)]);
+                printf("I am responding with (%d) %s\n", ntohs(query_response.card_id), knowledge.card_names[ntohs(query_response.card_id)]);
+                int data_len = query_response_header.data_length;
+                query_response_header.data_length = ntohl(data_len);
                 send(fd, &query_response_header, sizeof(query_response_header), MSG_DONTWAIT);
-                send(fd, &query_response, query_response_header.data_length, MSG_DONTWAIT);
+                send(fd, &query_response, data_len, MSG_DONTWAIT);
             }
         }
+    } else if (header->type == FRAME_TYPE_REPLY) {
+        ReplyFrame_t* reply = (ReplyFrame_t*)buffer;
+        printf("%d showed %d\n", reply->player_id, ntohs(reply->card_id));
     }
 
     free(buffer);
