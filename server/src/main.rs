@@ -6,19 +6,31 @@
 mod frames;
 
 use std::io::{BufRead, Write};
-use rand::seq::SliceRandom;
+use rand::seq::{IndexedRandom, SliceRandom};
 use rand::Rng;
 use frames::Card;
 
 struct Player {
-    in_stream: std::io::BufReader<std::net::TcpStream>,
-    out_stream: std::io::BufWriter<std::net::TcpStream>,
+    stream: std::net::TcpStream,
     address: std::net::SocketAddr,
     eliminated: bool,
     autoplay: bool,
     id: i8,
     name: String,
     hand: Vec<Card>,
+}
+impl Clone for Player {
+    fn clone(&self) -> Self {
+        return Player {
+            stream: self.stream.try_clone().unwrap(), // TODO
+            address: self.address.clone(),
+            eliminated: self.eliminated,
+            autoplay: self.autoplay,
+            id: self.id,
+            name: self.name.clone(),
+            hand: self.hand.clone(),
+        }
+    }
 }
 
 struct Lobby {
@@ -71,7 +83,7 @@ fn main() -> Result<(), String> {
         while lobby.players.len() < settings.lobby_size.try_into().unwrap() {
             // Wait for players
             match listener.accept() {
-                Ok(connection) => {
+                Ok(mut connection) => {
                     if settings.timeout == 0 {
                         if let Err(error) = connection.0.set_read_timeout(None) {
                             println!("Failed to set timeout: {}", error.to_string());
@@ -81,38 +93,27 @@ fn main() -> Result<(), String> {
                             println!("Failed to set timeout: {}", error.to_string());
                         }
                     }
-                    match connection.0.try_clone() {
-                        Ok(cloned_stream) => {
-                            let mut in_stream = std::io::BufReader::new(connection.0);
-                            let mut out_stream = std::io::BufWriter::new(cloned_stream);
-                            match frames::expect_frame::<frames::ConnectFrame>(&mut in_stream) {
-                                Ok(connect_frame) => {
-                                    if frames::send_frame(&mut out_stream, &rules_frame).is_ok() {
-                                        let _ = out_stream.flush();
-                                        println!("{} connected", connect_frame.name);
-                                        rules_frame.player_id += 1;
-                                        lobby.players.push(Player {
-                                            in_stream: in_stream,
-                                            out_stream: out_stream,
-                                            address: connection.1,
-                                            eliminated: false,
-                                            autoplay: false,
-                                            id: rules_frame.player_id,
-                                            name: connect_frame.name,
-                                            hand: Vec::new(),
-                                        });
-                                    } else {
-                                        // Failed to send for some reason, maybe they closed the socket?
-                                    }
-                                }
-                                Err(error) => {
-                                    let _ = frames::send_frame(&mut out_stream, &frames::DebugFrame { message: error.to_string() });
-                                }
+                    match frames::expect_frame::<frames::ConnectFrame>(&mut connection.0) {
+                        Ok(connect_frame) => {
+                            if frames::send_frame(&mut connection.0, &rules_frame).is_ok() {
+                                let _ = connection.0.flush();
+                                println!("{} connected", connect_frame.name);
+                                lobby.players.push(Player {
+                                    stream: connection.0,
+                                    address: connection.1,
+                                    eliminated: false,
+                                    autoplay: false,
+                                    id: rules_frame.player_id,
+                                    name: connect_frame.name,
+                                    hand: Vec::new(),
+                                });
+                                rules_frame.player_id += 1;
+                            } else {
+                                // Failed to send for some reason, maybe they closed the socket?
                             }
                         }
-                        Err(_) => {
-                            eprintln!("Failed to clone stream for {}", connection.1);
-                            continue;
+                        Err(error) => {
+                            let _ = frames::send_frame(&mut connection.0, &frames::DebugFrame { message: error.to_string() });
                         }
                     }
                 }
@@ -162,10 +163,10 @@ fn run_lobby(lobby: &mut Lobby, settings: &Settings) {
     deck.shuffle(&mut rand::rng());
 
     // Deal cards to players
-    let mut turn_idx = 0;
+    let mut turn_idx: i32 = 0;
     while deck.len() > 0 {
-        lobby.players.get_mut(turn_idx).unwrap().hand.push(deck.pop().unwrap());
-        turn_idx = (turn_idx + 1) % lobby.players.len();
+        lobby.players.get_mut(turn_idx as usize).unwrap().hand.push(deck.pop().unwrap());
+        turn_idx = (turn_idx + 1) % lobby.players.len() as i32;
     }
 
     // Send game start frames
@@ -187,23 +188,246 @@ fn run_lobby(lobby: &mut Lobby, settings: &Settings) {
             hand: hand_ids,
             players: players_info.clone(),
         };
-        if frames::send_frame(&mut player.out_stream, &start_frame).is_err() {
+        if frames::send_frame(&mut player.stream, &start_frame).is_err() {
             let cancel_game = frames::DebugFrame {
                 message: String::from("Aborting game due to early disconnect"),
             };
             for player in lobby.players.iter_mut() {
-                let _ = frames::send_frame(&mut player.out_stream, &cancel_game);
+                let _ = frames::send_frame(&mut player.stream, &cancel_game);
             }
             return;
         }
     }
 
-    println!("got here");
-    let test = frames::DebugFrame {
-        message: String::from("TEST"),
-    };
-    frames::send_frame(&mut lobby.players.get_mut(0).unwrap().out_stream, &test);
+    // Run the game
+    let winning_player;
+    let mut first_turn = true;
+    turn_idx = 0;
+    loop {
+        // Count eliminated players
+        let mut eliminated_count = 0;
+        let mut not_eliminated = 0;
+        for player in lobby.players.iter() {
+            if player.eliminated || player.autoplay {
+                eliminated_count += 1;
+            } else {
+                not_eliminated = player.id;
+            }
+        }
+        if eliminated_count >= lobby.players.len() - 1 {
+            // Game ends due to players eliminated
+            let game_end_frame = frames::GameEndFrame {
+                winner: not_eliminated,
+                won_by_default: true,
+            };
+            for player in lobby.players.iter_mut() {
+                let _ = frames::send_frame(&mut player.stream, &game_end_frame);
+            }
+            break;
+        }
 
+        // Advance player turn and announce it
+        if lobby.players.len() == 0 {
+            println!("Somehow a lobby had 0 players, emergency stopping");
+            return;
+        }
+        if !first_turn {
+            turn_idx = (turn_idx + 1) % lobby.players.len() as i32;
+        } else {
+            first_turn = false;
+        }
+        let mut current_player = lobby.players.get_mut(turn_idx as usize).unwrap().clone();
+        
+        // If this player is eliminated, skip their turn
+        if current_player.eliminated || current_player.autoplay {
+            continue;
+        }
+
+        // Notify everyone it is this player's turn
+        println!("player {} turn", current_player.id);
+        let turn_start_frame = frames::TurnFrame {
+            player_id: current_player.id,
+        };
+        for player in lobby.players.iter_mut() {
+            let _ = frames::send_frame(&mut player.stream, &turn_start_frame);
+        }
+
+        // Expect that player to take an action
+        let mut is_solving = false;
+        let mut suggestion = Vec::new();
+        if !current_player.autoplay {
+            match frames::expect_frame::<frames::ActionFrame>(&mut current_player.stream) {
+                Ok(action_frame) => {
+                    is_solving = action_frame.is_solving;
+                    for card in action_frame.suggestion.iter() {
+                        suggestion.push(*card);
+                    }
+                },
+                Err(_) => {
+                    // Probably timed out, automate
+                    let autoplay_reason_frame = frames::DebugFrame {
+                        message: String::from("Set to autoplay due to timeout on turn"),
+                    };
+                    let _ = frames::send_frame(&mut current_player.stream, &autoplay_reason_frame);
+                    lobby.players.get_mut(turn_idx as usize).unwrap().autoplay = true;
+                    current_player.autoplay = true;
+                }
+            }
+        }
+
+        // Is the action valid?
+        suggestion.sort();
+        if suggestion.len() == settings.cards.len() {
+            for category_idx in 0..settings.cards.len() {
+                let mut is_found = false;
+                for card in settings.cards.get(category_idx).unwrap() {
+                    if card.id == suggestion[category_idx] {
+                        is_found = true;
+                        break;
+                    }
+                }
+                if !is_found {
+                    // Not one card per category
+                    let autoplay_reason_frame = frames::DebugFrame {
+                        message: String::from("Set to autoplay due to invalid set of suggested cards"),
+                    };
+                    let _ = frames::send_frame(&mut current_player.stream, &autoplay_reason_frame);
+                    lobby.players.get_mut(turn_idx as usize).unwrap().autoplay = true;
+                    current_player.autoplay = true;
+                    break;
+                }
+            }
+        } else {
+            // Suggested the wrong number of cards
+            let autoplay_reason_frame = frames::DebugFrame {
+                message: String::from("Set to autoplay due to wrong number of suggested cards"),
+            };
+            let _ = frames::send_frame(&mut current_player.stream, &autoplay_reason_frame);
+            lobby.players.get_mut(turn_idx as usize).unwrap().autoplay = true;
+            current_player.autoplay = true;
+        }
+
+        // If the player is on autoplay, do a random suggestion
+        if current_player.autoplay {
+            is_solving = false;
+            suggestion.clear();
+            for category in settings.cards.iter() {
+                suggestion.push(category.choose(&mut rand::rng()).unwrap().id);
+            }
+        }
+
+        // If the player attempted to solve, handle those cases
+        if is_solving {
+            let mut solution_correct = true;
+            for card in lobby.solution.iter() {
+                if !suggestion.contains(&card.id) {
+                    solution_correct = false;
+                    break;
+                }
+            }
+            if solution_correct {
+                // The player won the game, send the game end frame
+                let game_end_frame = frames::GameEndFrame {
+                    winner: current_player.id,
+                    won_by_default: false,
+                };
+                for player in lobby.players.iter_mut() {
+                    let _ = frames::send_frame(&mut player.stream, &game_end_frame);
+                }
+                winning_player = Some(current_player);
+                break;
+            } else {
+                // The player is eliminated
+                lobby.players.get_mut(turn_idx as usize).unwrap().eliminated = true;
+                current_player.eliminated = true;
+                continue;
+            }
+        }
+
+        // Program flow only gets here on a normal suggestion
+        let mut queried_player_idx = (turn_idx + 1) % lobby.players.len() as i32;
+        while queried_player_idx != turn_idx {
+            // Tell everyone that someone is under the gun
+            let mut queried_player = lobby.players.get_mut(turn_idx as usize).unwrap().clone();
+            let query_frame = frames::ActionFrame {
+                player_id: current_player.id,
+                responder_id: queried_player.id,
+                suggestion: suggestion.clone(),
+                is_solving: is_solving,
+            };
+            for player in lobby.players.iter_mut() {
+                let _ = frames::send_frame(&mut player.stream, &query_frame);
+            }
+
+            // Queried player needs to respond
+            let mut player_chosen_card = -1;
+            if let Ok(reply_frame) = frames::expect_frame::<frames::ReplyFrame>(&mut queried_player.stream) {
+                player_chosen_card = reply_frame.card;
+            } else {
+                // Probably timed out, automate
+                let autoplay_reason_frame = frames::DebugFrame {
+                    message: String::from("Set to autoplay due to timeout on query"),
+                };
+                let _ = frames::send_frame(&mut queried_player.stream, &autoplay_reason_frame);
+                lobby.players.get_mut(turn_idx as usize).unwrap().autoplay = true;
+                queried_player.autoplay = true;
+            }
+
+            // First question... was the player obligated to respond?
+            let mut response_card = None;
+            for card in queried_player.hand.iter() {
+                if suggestion.contains(&card.id) {
+                    response_card = Some(card.id);
+                    break;
+                }
+            }
+            if response_card != None {
+                // Player is obligated to respond, did they respond legally?
+                if !suggestion.contains(&player_chosen_card) {
+                    // Responded with a card that wasn't suggested
+                    let autoplay_reason_frame = frames::DebugFrame {
+                        message: String::from("Set to autoplay due to not responding to a suggestion"),
+                    };
+                    let _ = frames::send_frame(&mut queried_player.stream, &autoplay_reason_frame);
+                    queried_player.autoplay = true;
+                } else {
+                    let mut player_holds_card = false;
+                    for card in queried_player.hand.iter() {
+                        if card.id == player_chosen_card {
+                            player_holds_card = true;
+                            break;
+                        }
+                    }
+                    if !player_holds_card {
+                        // Responded with a card they don't hold
+                        let autoplay_reason_frame = frames::DebugFrame {
+                            message: String::from("Set to autoplay due to responding to a suggestion with a not held card"),
+                        };
+                        let _ = frames::send_frame(&mut queried_player.stream, &autoplay_reason_frame);
+                        lobby.players.get_mut(turn_idx as usize).unwrap().autoplay = true;
+                        queried_player.autoplay = true;
+                    }
+
+                    // Legal response
+                    response_card = Some(player_chosen_card);
+                }
+            }
+
+            // Send the reply to all players
+            let reply_frame = frames::ReplyFrame {
+                player_id: queried_player.id,
+                card: response_card.unwrap_or(-1),
+            };
+            for player in lobby.players.iter_mut() {
+                let _ = frames::send_frame(&mut player.stream, &reply_frame);
+            }
+
+            // Go next
+            queried_player_idx = (queried_player_idx + 1) % lobby.players.len() as i32;
+        }
+    }
+
+    // Wrap up the lobby
     println!("shutting down lobby");
 }
 

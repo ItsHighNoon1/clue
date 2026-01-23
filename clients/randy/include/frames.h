@@ -1,5 +1,3 @@
-// Copied on 12/30/25
-
 #ifndef __frames_h__
 #define __frames_h__
 
@@ -14,21 +12,13 @@ typedef struct {
     char data[0];
 } Frame_t;
 
-#define FRAME_TYPE_ERROR 1
-// A frame sent by the server to the client to communicate an error. This is for debug purposes
+#define FRAME_TYPE_DEBUG 1
+// A frame sent by the server to the client to communicate something. This is for debug purposes
 // when the client does something wrong so that the programmer can fix their client.
 typedef struct {
     int32_t error_length;
     char error[0];
-} ErrorFrame_t;
-
-#define FRAME_TYPE_ABORT 2
-// A frame sent by the server to the client when the server needs to abort the game gracefully.
-// Usually this is because a client has disconnected.
-typedef struct {
-    int32_t error_length;
-    char error[0];
-} AbortFrame_t;
+} DebugFrame_t;
 
 #define FRAME_TYPE_CONNECT 2
 // The first frame a client sends to the server. It has the name of the client.
@@ -75,48 +65,31 @@ typedef struct {
     int8_t player_id; // If this is your ID, you must respond with a FRAME_TYPE_TURN_RESPONSE
 } TurnFrame_t;
 
-#define FRAME_TYPE_TURN_RESPONSE 6
+#define FRAME_TYPE_ACTION 6
 // Sent by the client in response to FRAME_TYPE_TURN to indicate the suggestion.
 typedef struct {
-    int16_t suggestion[0]; // Length <num_categories> from FRAME_TYPE_RULES
-} TurnResponseFrame_t;
-
-#define FRAME_TYPE_QUERY 7
-// Sent by the server to players in order following a suggestion.
-typedef struct {
-    int8_t player_id; // If this is your ID, you must respond with a FRAME_TYPE_TURN_RESPONSE
+    int8_t player_id;
+    int8_t responder_id;
+    int8_t solving;
     int8_t _reserved;
     int16_t suggestion[0]; // Length <num_categories> from FRAME_TYPE_RULES
-} QueryFrame_t;
+} ActionFrame_t;
 
-#define FRAME_TYPE_QUERY_RESPONSE 8
+#define FRAME_TYPE_REPLY 7
 // Sent by the client in response to FRAME_TYPE_QUERY to indicate the response.
-typedef struct {
-    int16_t card_id; // If you are not obligated to show card_id, the server will either:
-                     // (1) Choose a random card that you are obligated to show, if possible
-                     // (2) Not show a card.
-} QueryResponseFrame_t;
-
-#define FRAME_TYPE_QUERY_RETURN 9
-// Sent by the server when a client responds to a suggestion.
 typedef struct {
     int8_t player_id;
     int8_t _reserved;
-    int16_t card_id; // -1 (0xFFFF) indicates no card. If you are not the client that made the suggestion but a card was showed, this is always 0
-} QueryAnouncementFrame_t;
+    int16_t card_id; // If you are not obligated to show card_id, the server will either:
+                     // (1) Choose a random card that you are obligated to show, if possible
+                     // (2) Not show a card.
+} ReplyFrame_t;
 
-#define FRAME_TYPE_SOLVE_ATTEMPT 10
-// Sent by a client in response to FRAME_TYPE_TURN when trying to solve the game.
+#define FRAME_TYPE_GAME_END 8
+// Sent by the server when a client responds to a suggestion.
 typedef struct {
-    int16_t cards[0]; // Length <num_categories> from FRAME_TYPE_RULES
-} SolveAttemptFrame_t;
-
-#define FRAME_TYPE_SOLVE_RESULT 11
-// Sent by the server to all players in response to a solve attempt.
-typedef struct {
-    int8_t player;
-    int8_t correct; // 0 if the game continues, 1 if the game ends
-    int16_t cards[0]; // Length <num_categories> from FRAME_TYPE_RULES
-} SolveResultFrame_t;
+    int8_t winner;
+    int8_t won_by_default;
+} GameEndFrame_t;
 
 #endif

@@ -395,32 +395,142 @@ const FRAME_TYPE_TURN: i8 = 5;
 pub struct TurnFrame {
     pub player_id: i8,
 }
+impl Frame<TurnFrame> for TurnFrame {
+    fn serialize(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(self.player_id as u8);
+        return bytes;
+    }
 
-const FRAME_TYPE_SUGGESTION: i8 = 6;
-pub struct SuggestionFrame {
-    pub player_id: i8,
-    pub suggestion: Vec<i16>,
+    fn deserialize(bytes: &[u8]) -> Result<TurnFrame, std::io::Error> {
+        if bytes.len() < 1 {
+            return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "Incomplete turn frame"));
+        }
+        return Ok(TurnFrame {
+            player_id: bytes[0] as i8,
+        });
+    }
+
+    fn get_type() -> i8 {
+        return FRAME_TYPE_TURN;
+    }
 }
 
-const FRAME_TYPE_SUGGESTION_RESPONSE: i8 = 7;
-pub struct SuggestionResponseFrame {
+const FRAME_TYPE_ACTION: i8 = 6;
+pub struct ActionFrame {
+    pub player_id: i8,
+    pub responder_id: i8,
+    pub suggestion: Vec<i16>,
+    pub is_solving: bool,
+}
+impl Frame<ActionFrame> for ActionFrame {
+    fn serialize(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(self.player_id as u8);
+        bytes.push(self.responder_id as u8);
+        bytes.push(if self.is_solving { 1 } else { 0 });
+        bytes.push(0);
+        for card in self.suggestion.iter() {
+            let card_big_endian = (*card).to_be_bytes();
+            bytes.push(card_big_endian[0]);
+            bytes.push(card_big_endian[1]);
+        }
+        return bytes;
+    }
+
+    fn deserialize(bytes: &[u8]) -> Result<ActionFrame, std::io::Error> {
+        if bytes.len() < 4 {
+            return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "Incomplete action frame"));
+        }
+        let num_cards = bytes.len() / 2 - 1;
+        let mut cards = Vec::new();
+        for card_idx in 0..num_cards {
+            let card_big_endian: [u8; 2] = [bytes[2 + card_idx * 2], bytes[2 + card_idx * 2 + 1]];
+            let card = i16::from_be_bytes(card_big_endian);
+            if card < 0 {
+                return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Card ID out of bounds"));
+            }
+            cards.push(card);
+        }
+
+        return Ok(ActionFrame {
+            player_id: bytes[0] as i8,
+            responder_id: bytes[1] as i8,
+            suggestion: cards,
+            is_solving: bytes[2] != 0,
+        });
+    }
+
+    fn get_type() -> i8 {
+        return FRAME_TYPE_ACTION;
+    }
+}
+
+const FRAME_TYPE_REPLY: i8 = 7;
+pub struct ReplyFrame {
     pub player_id: i8,
     pub card: i16,
 }
+impl Frame<ReplyFrame> for ReplyFrame {
+    fn serialize(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(self.player_id as u8);
+        bytes.push(0);
+        let card_big_endian = (self.card).to_be_bytes();
+        bytes.push(card_big_endian[0]);
+        bytes.push(card_big_endian[1]);
+        return bytes;
+    }
 
-const FRAME_TYPE_SOLVE: i8 = 8;
-pub struct SolveFrame {
-    pub solution: Vec<i16>,
+    fn deserialize(bytes: &[u8]) -> Result<ReplyFrame, std::io::Error> {
+        if bytes.len() < 4 {
+            return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "Incomplete reply frame"));
+        }
+        let card_big_endian: [u8; 2] = [bytes[2], bytes[3]];
+        let card = i16::from_be_bytes(card_big_endian);
+        if card < 0 {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Card ID out of bounds"));
+        }
+        return Ok(ReplyFrame {
+            player_id: bytes[0] as i8,
+            card: card,
+        });
+    }
+
+    fn get_type() -> i8 {
+        return FRAME_TYPE_REPLY;
+    }
 }
 
-const FRAME_TYPE_SOLVE_RESPONSE: i8 = 9;
-pub struct SolveResponseFrame {
-    pub player_id: i8,
-    pub correct: bool,
-    pub solution: Vec<i16>,
+const FRAME_TYPE_GAME_END: i8 = 8;
+pub struct GameEndFrame {
+    pub winner: i8,
+    pub won_by_default: bool,
+}
+impl Frame<GameEndFrame> for GameEndFrame {
+    fn serialize(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(self.winner as u8);
+        bytes.push(if self.won_by_default { 1 } else { 0 });
+        return bytes;
+    }
+
+    fn deserialize(bytes: &[u8]) -> Result<GameEndFrame, std::io::Error> {
+        if bytes.len() < 2 {
+            return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "Incomplete game end frame"));
+        }
+        return Ok(GameEndFrame {
+            winner: bytes[0] as i8,
+            won_by_default: bytes[1] != 0,
+        });
+    }
+
+    fn get_type() -> i8 {
+        return FRAME_TYPE_GAME_END;
+    }
 }
 
-pub fn send_frame<F: Frame<F>>(writer: &mut std::io::BufWriter<std::net::TcpStream>, frame: &F) -> Result<(), std::io::Error> {
+pub fn send_frame<F: Frame<F>>(writer: &mut std::net::TcpStream, frame: &F) -> Result<(), std::io::Error> {
     let frame_bytes = frame.serialize();
     let frame_header = FrameHeader {
         frame_type: F::get_type(),
@@ -433,15 +543,17 @@ pub fn send_frame<F: Frame<F>>(writer: &mut std::io::BufWriter<std::net::TcpStre
     return Ok(());
 }
 
-pub fn expect_frame<F: Frame<F>>(reader: &mut std::io::BufReader<std::net::TcpStream>) -> Result<F, std::io::Error> {
-    let mut frame_header_bytes: [u8; 8] = [0; 8];
-    let mut frame_header: FrameHeader;
+pub fn expect_frame<F: Frame<F>>(reader: &mut std::net::TcpStream) -> Result<F, std::io::Error> {
+    let mut frame_header;
     loop {
+        let mut frame_header_bytes: [u8; 8] = [0; 8];
         reader.read_exact(&mut frame_header_bytes[..])?;
         frame_header = FrameHeader::deserialize(&frame_header_bytes)?;
+
         if frame_header.frame_type == F::get_type() {
             break;
         } else {
+            // Some other frame, throw it away
             std::io::copy(&mut reader.take(frame_header.data_length as u64), &mut std::io::sink())?;
         }
     }
