@@ -52,7 +52,7 @@ int main(int argc, char** argv) {
     ConnectFrame_t connect_frame;
     connect_frame.name_length = strlen(NAME);
     header.type = FRAME_TYPE_CONNECT;
-    header.data_length = sizeof(connect_frame) + strlen(NAME);
+    header.data_length = htonl(sizeof(connect_frame) + strlen(NAME));
 
     send(fd, &header, sizeof(header), MSG_DONTWAIT); // Send header
     send(fd, &connect_frame, sizeof(connect_frame), MSG_DONTWAIT); // Send connect frame header
@@ -60,6 +60,7 @@ int main(int argc, char** argv) {
 
     while (1) {
         int data_length = recv(fd, &header, sizeof(header), MSG_WAITALL);
+        header.data_length = ntohl(header.data_length);
         if (data_length < sizeof(header)) {
             if (data_length == -1 && errno == EAGAIN) {
                 continue;
@@ -67,7 +68,7 @@ int main(int argc, char** argv) {
                 perror(NULL);
                 exit(1);
             }
-            printf("Server sent incomplete frame\n");
+            printf("Server sent incomplete frame %d\n", data_length);
             break;
         }
         handle_frame(&header, fd); // This consumes the rest of the stream
@@ -132,28 +133,23 @@ void handle_frame(Frame_t* header, int fd) {
         exit(0);
     }
 
-    if (header->type == FRAME_TYPE_ERROR) {
+    if (header->type == FRAME_TYPE_DEBUG) {
         // Server sends this to us when we mess up. Print
-        ErrorFrame_t* error = (ErrorFrame_t*)buffer;
-        printf("Server reported error: %.*s\n", error->error_length, error->error);
+        DebugFrame_t* error = (DebugFrame_t*)buffer;
+        printf("Server reported error: %.*s\n", ntohl(error->error_length), error->error);
         exit(1);
-    } else if (header->type == FRAME_TYPE_ABORT) {
-        // Server sends this to us when it messes up. Print
-        AbortFrame_t* abort = (AbortFrame_t*)buffer;
-        printf("Server aborted: %.*s\n", abort->error_length, abort->error);
-        exit(0);
     } else if (header->type == FRAME_TYPE_RULES) {
         // Populate our knowledge with what we can
         RulesFrame_t* rules = (RulesFrame_t*)buffer;
         knowledge.player_id = rules->player_id;
-        knowledge.total_cards = rules->num_cards;
+        knowledge.total_cards = ntohs(rules->num_cards);
         knowledge.num_categories = rules->num_categories;
         knowledge.num_cards_in_category = malloc(knowledge.num_categories * sizeof(int));
         int16_t* num_cards_in_category = (int16_t*)&rules->num_cards_in_category;
         for (int i = 0; i < knowledge.num_categories; i++) {
-            knowledge.num_cards_in_category[i] = num_cards_in_category[i];
+            knowledge.num_cards_in_category[i] = ntohs(num_cards_in_category[i]);
         }
-        char* card_name_data = (char*)num_cards_in_category + rules->num_categories * sizeof(int16_t) + rules->num_cards * sizeof(int16_t);
+        char* card_name_data = (char*)num_cards_in_category + rules->num_categories * sizeof(int16_t);
         knowledge.card_names = malloc(knowledge.total_cards * sizeof(char*));
         for (int i = 0; i < knowledge.total_cards; i++) {
             int card_name_length = *card_name_data;
@@ -163,16 +159,16 @@ void handle_frame(Frame_t* header, int fd) {
             knowledge.card_names[i][card_name_length] = '\0';
             card_name_data += card_name_length;
         }
-        printf("Connected as player %d, %d categories, %d cards\n", rules->player_id, rules->num_categories, rules->num_cards);
+        printf("Connected as player %d, %d categories, %d cards\n", rules->player_id, rules->num_categories, ntohs(rules->num_cards));
     } else if (header->type == FRAME_TYPE_START) {
         // Since we are playing randomly, we don't care about the meta information, just our hand
         StartFrame_t* start = (StartFrame_t*)buffer;
-        knowledge.hand_size = start->your_hand_size;
+        knowledge.hand_size = htons(start->your_hand_size);
         knowledge.hand = malloc(knowledge.hand_size * sizeof(int));
         int16_t* my_hand = (int16_t*)&start->your_hand;
         printf("I got dealt:\n");
         for (int i = 0; i < knowledge.hand_size; i++) {
-            knowledge.hand[i] = my_hand[i];
+            knowledge.hand[i] = htons(my_hand[i]);
             assert(knowledge.card_names != NULL);
             printf("  %s\n", knowledge.card_names[knowledge.hand[i]]);
         }
@@ -183,50 +179,39 @@ void handle_frame(Frame_t* header, int fd) {
             printf("My turn\n");
             knowledge.turns_played++;
 
+            // Make a random suggestion
+            Frame_t suggestion_header = {};
+            suggestion_header.type = FRAME_TYPE_ACTION;
+            suggestion_header.data_length = sizeof(ActionFrame_t) + knowledge.num_categories * sizeof(int16_t);
+            ActionFrame_t* suggestion = malloc(suggestion_header.data_length);
+            int base_idx = 0;
             if (knowledge.turns_played > 5) {
-                // Yolo guess since 100 turns have happened and the game probably isn't ending
-                Frame_t solve_attempt_header = {};
-                solve_attempt_header.type = FRAME_TYPE_SOLVE_ATTEMPT;
-                solve_attempt_header.data_length = sizeof(SolveAttemptFrame_t) + knowledge.num_categories * sizeof(int16_t);
-                SolveAttemptFrame_t* solve_attempt = malloc(solve_attempt_header.data_length);
-                int base_idx = 0;
-                printf("Guessing: ");
-                for (int i = 0; i < knowledge.num_categories; i++) {
-                    solve_attempt->cards[i] = rand() % knowledge.num_cards_in_category[i] + base_idx;
-                    base_idx += knowledge.num_cards_in_category[i];
-                    printf("(%d) %s, ", solve_attempt->cards[i], knowledge.card_names[solve_attempt->cards[i]]);
-                }
-                printf("\n");
-                send(fd, &solve_attempt_header, sizeof(solve_attempt_header), MSG_DONTWAIT);
-                send(fd, solve_attempt, solve_attempt_header.data_length, MSG_DONTWAIT);
-                free(solve_attempt);
+                printf("Solving: ");
+                suggestion->solving = 1;
             } else {
-                // Make a random suggestion
-                Frame_t suggestion_header = {};
-                suggestion_header.type = FRAME_TYPE_TURN_RESPONSE;
-                suggestion_header.data_length = sizeof(TurnResponseFrame_t) + knowledge.num_categories * sizeof(int16_t);
-                TurnResponseFrame_t* suggestion = malloc(suggestion_header.data_length);
-                int base_idx = 0;
                 printf("Suggesting: ");
-                for (int i = 0; i < knowledge.num_categories; i++) {
-                    suggestion->suggestion[i] = rand() % knowledge.num_cards_in_category[i] + base_idx;
-                    base_idx += knowledge.num_cards_in_category[i];
-                    printf("(%d) %s, ", suggestion->suggestion[i], knowledge.card_names[suggestion->suggestion[i]]);
-                }
-                printf("\n");
-                send(fd, &suggestion_header, sizeof(suggestion_header), MSG_DONTWAIT);
-                send(fd, suggestion, suggestion_header.data_length, MSG_DONTWAIT);
-                free(suggestion);
+                suggestion->solving = 0;
             }
+            for (int i = 0; i < knowledge.num_categories; i++) {
+                suggestion->suggestion[i] = htons(rand() % knowledge.num_cards_in_category[i] + base_idx);
+                base_idx += knowledge.num_cards_in_category[i];
+                printf("(%d) %s, ", ntohs(suggestion->suggestion[i]), knowledge.card_names[ntohs(suggestion->suggestion[i])]);
+            }
+            printf("\n");
+            int data_len = suggestion_header.data_length;
+            suggestion_header.data_length = ntohl(data_len);
+            send(fd, &suggestion_header, sizeof(suggestion_header), MSG_DONTWAIT);
+            send(fd, suggestion, data_len, MSG_DONTWAIT);
+            free(suggestion);
         }
-    } else if (header->type == FRAME_TYPE_QUERY) {
-        QueryFrame_t* query = (QueryFrame_t*)buffer;
+    } else if (header->type == FRAME_TYPE_ACTION) {
+        ActionFrame_t* query = (ActionFrame_t*)buffer;
 
         // If not for us, ignore
-        if (query->player_id == knowledge.player_id) {
+        if (query->responder_id == knowledge.player_id) {
             printf("I have to respond to: ");
             for (int i = 0; i < knowledge.num_categories; i++) {
-                printf("(%d) %s, ", query->suggestion[i], knowledge.card_names[query->suggestion[i]]);
+                printf("(%d) %s, ", ntohs(query->suggestion[i]), knowledge.card_names[ntohs(query->suggestion[i])]);
             }
             printf("\n");
 
@@ -236,36 +221,41 @@ void handle_frame(Frame_t* header, int fd) {
             int num_cards_held = 0;
             for (int i = 0; i < knowledge.hand_size; i++) {
                 for (int j = 0; j < knowledge.num_categories; j++) {
-                    if (knowledge.hand[i] == query->suggestion[j]) {
+                    if (knowledge.hand[i] == ntohs(query->suggestion[j])) {
                         cards_held[num_cards_held++] = knowledge.hand[i];
                         break;
                     }
                 }
             }
             if (num_cards_held == 0) {
-                // We don't need to pass, the server will do it for us
+                // We still need to send a bogus frame
+                ReplyFrame_t query_response = {};
+                query_response.card_id = -1;
+                Frame_t query_response_header = {};
+                query_response_header.type = FRAME_TYPE_REPLY;
+                query_response_header.data_length = sizeof(query_response);
+                printf("I have nothing\n");
+                int data_len = query_response_header.data_length;
+                query_response_header.data_length = ntohl(data_len);
+                send(fd, &query_response_header, sizeof(query_response_header), MSG_DONTWAIT);
+                send(fd, &query_response, data_len, MSG_DONTWAIT);
             } else {
                 // Now we can be random
-                QueryResponseFrame_t query_response = {};
-                query_response.card_id = cards_held[rand() % num_cards_held];
+                ReplyFrame_t query_response = {};
+                query_response.card_id = htons(cards_held[rand() % num_cards_held]);
                 Frame_t query_response_header = {};
-                query_response_header.type = FRAME_TYPE_QUERY_RESPONSE;
+                query_response_header.type = FRAME_TYPE_REPLY;
                 query_response_header.data_length = sizeof(query_response);
-                printf("I am responding with (%d) %s\n", query_response.card_id, knowledge.card_names[query_response.card_id]);
+                printf("I am responding with (%d) %s\n", ntohs(query_response.card_id), knowledge.card_names[ntohs(query_response.card_id)]);
+                int data_len = query_response_header.data_length;
+                query_response_header.data_length = ntohl(data_len);
                 send(fd, &query_response_header, sizeof(query_response_header), MSG_DONTWAIT);
-                send(fd, &query_response, query_response_header.data_length, MSG_DONTWAIT);
+                send(fd, &query_response, data_len, MSG_DONTWAIT);
             }
         }
-    } else if (header->type == FRAME_TYPE_QUERY_RETURN) {
-        // Randy does not care about these (but you probably should!)
-    } else if (header->type == FRAME_TYPE_SOLVE_RESULT) {
-        // Randy really does not care about this... unless he wins
-        SolveResultFrame_t* result = (SolveResultFrame_t*)buffer;
-        if (result->player == knowledge.player_id && result->correct) {
-            printf("gg id like to thank monte carlo for this victory\n");
-        }
-    } else {
-        printf("Unhandled frame %d\n", header->type);
+    } else if (header->type == FRAME_TYPE_REPLY) {
+        ReplyFrame_t* reply = (ReplyFrame_t*)buffer;
+        printf("%d showed %d\n", reply->player_id, ntohs(reply->card_id));
     }
 
     free(buffer);
