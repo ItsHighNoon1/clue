@@ -1,4 +1,4 @@
-# Clue 0.1
+# Clue 0.2
 
 The classic board game [Clue](https://en.wikipedia.org/wiki/Cluedo), played by computers!
 
@@ -10,29 +10,28 @@ I also have a love for mathematical games, which I share with my father. Family 
 
 When the questions get too complicated, we talk about running simulations. Thus, this project. A testbed where bots can play Clue, so we can finally settle what the optimal Clue strategy is once and for all.
 
-See `server/first_ever_game.txt` for the server output from first game that finished without some terrible malfunction.
-
 ## Building
 
-On Linux (or Mac?), running `build.sh` from the root directory will build the project. My preferred compiler is Clang but I'm sure it'll work with GCC if you just find + replace in the build script. The server executable will be located at `server/server`. See `clients/README` for more information on clients.
+From bash, running `build.sh` from the root directory will build the entire project, which includes the server and all clients.
 
-Can't help you with Windows right now. It will probably work under MinGW or WSL.
+The server can be built with `server/build.sh`. If you look inside you will see it is just `cargo build`. I have only tested on x86 Linux but I have no reason to suspect it would not work out of the box on any platform.
+
+The clients each have their own build script in their directory. Right now there is only one client and it is using `clang` which is my preferred C compiler. I suspect `gcc` will work but there is a requirement for `unistd.h` so it is not going to work on Windows (stay tuned...)
 
 ## Usage
 
-Running `server/server` will start the game server with the settings specified in `settings.txt`. Once the server is running, it will wait SERVER_LOBBY_WAIT_TIME seconds (default 10) for clients to connect. Randy (a dummy client) can be started with `clients/randy/randy [ip] [port]`.
+Running `server/server` will start the game server with the settings specified in `settings.txt`. Once the server is running, it will wait for clients to connect. After at least 2 clients have connected, a game will begin after some number of seconds or after the maximum number of players have connected. Once a game begins, it will run in the background and the server will start a new lobby for the next game.
 
-The server is not at all bulletproof. I would not recommend running it continuously on an open port right now.
+Randy (a dummy client) can be started with `clients/randy/randy [ip] [port]`.
 
 ## Future
 
 I have some things in mind for the future of this project. In rough order:
-1. Rewrite the server in Rust or Java for security, portability, and maintainability reasons.
-  - Also provide a header-only library to simplify bot development in C.
-2. Add a graphical frontend so you can watch the game.
+1. Provide a (cross platform?) header only library to make it easy to make C bots.
+2. Add a graphical frontend so you can watch the game visually.
 3. Put the server on the web with a leaderboard.
 4. Add the board and rolling dice (I suspect this affects the optimal strategy considerably but frankly it isn't that interesting to me).
 
 ## Making your own bot
 
-If you are interested in making a bot, the network protocol is specified in `server/README`. It will almost certainly change before 1.0. I am happy to accept PRs and if a protocol change breaks your bot I'll fix it :).
+If you are interested in making a bot, there's some hints in `server/README`. See `clients/randy/include/frames.h` for half-functional frame definitions. I will create a cleaner example bot soon.
