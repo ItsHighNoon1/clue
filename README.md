@@ -20,18 +20,18 @@ The clients each have their own build script in their directory. Right now there
 
 ## Usage
 
-Running `server/server` will start the game server with the settings specified in `settings.txt`. Once the server is running, it will wait for clients to connect. After at least 2 clients have connected, a game will begin after some number of seconds or after the maximum number of players have connected. Once a game begins, it will run in the background and the server will start a new lobby for the next game.
+Running `server/server [settings file]` will start the game server with the settings specified in `[settings file]`. Once the server is running, it will wait for clients to connect. After at least 2 clients have connected, a game will begin after some number of seconds or after the maximum number of players have connected. Once a game begins, it will run in the background and the server will start a new lobby for the next game.
 
-Randy (a dummy client) can be started with `clients/randy/randy [ip] [port]`.
+An example client can be started with `clients/example/example [ip] [port]`.
 
 ## Future
 
 I have some things in mind for the future of this project. In rough order:
-1. Provide a (cross platform?) header only library to make it easy to make C bots.
-2. Add a graphical frontend so you can watch the game visually.
-3. Put the server on the web with a leaderboard.
+1. Add a graphical frontend so you can watch the game visually.
+2. Put the server on the web with a leaderboard.
+3. Make the C header library work on Windows.
 4. Add the board and rolling dice (I suspect this affects the optimal strategy considerably but frankly it isn't that interesting to me).
 
 ## Making your own bot
 
-If you are interested in making a bot, there's some hints in `server/README`. See `clients/randy/include/frames.h` for half-functional frame definitions. I will create a cleaner example bot soon.
+If you are interested in making a bot, there's some hints in `server/README`. The bot in `clients/example/example.c` uses the `clue.h` header for most of the internals so the main program only has game logic.
