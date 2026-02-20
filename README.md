@@ -1,4 +1,4 @@
-# Clue 0.2
+# Clue 0.3
 
 The classic board game [Clue](https://en.wikipedia.org/wiki/Cluedo), played by computers!
 
@@ -34,4 +34,4 @@ I have some things in mind for the future of this project. In rough order:
 
 ## Making your own bot
 
-If you are interested in making a bot, there's some hints in `server/README`. The bot in `clients/example/example.c` uses the `clue.h` header for most of the internals so the main program only has game logic.
+If you are interested in making a bot, there's a sample bot written in C in `clients/example`. It uses the `clue.h` header file to handle the network stuff and only contains strategy logic. For lower level details, see `server/README`.
