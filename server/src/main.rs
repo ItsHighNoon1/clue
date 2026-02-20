@@ -101,21 +101,37 @@ fn main() -> Result<(), String> {
                     }
                     match frames::expect_frame::<frames::ConnectFrame>(&mut connection.0) {
                         Ok(connect_frame) => {
-                            if frames::send_frame(&mut connection.0, &rules_frame).is_ok() {
-                                let _ = connection.0.flush();
-                                println!("{} connected", connect_frame.name);
-                                lobby.players.push(Player {
-                                    stream: connection.0,
-                                    address: connection.1,
-                                    eliminated: false,
-                                    autoplay: false,
-                                    id: rules_frame.player_id,
-                                    name: connect_frame.name,
-                                    hand: Vec::new(),
-                                });
-                                rules_frame.player_id += 1;
+                            // Null characters will probably brick a lot of bots, just don't allow them
+                            let mut has_nulls = false;
+                            for char in connect_frame.name.as_bytes() {
+                                if *char == 0 {
+                                    has_nulls = true;
+                                    break;
+                                }
+                            }
+                            if has_nulls {
+                                // Man get out of here
+                                let no_nulls = frames::DebugFrame {
+                                    message: String::from("Null characters in name not allowed"),
+                                };
+                                let _ = frames::send_frame(&mut connection.0, &no_nulls);
                             } else {
-                                // Failed to send for some reason, maybe they closed the socket?
+                                if frames::send_frame(&mut connection.0, &rules_frame).is_ok() {
+                                    let _ = connection.0.flush();
+                                    println!("{} connected", connect_frame.name);
+                                    lobby.players.push(Player {
+                                        stream: connection.0,
+                                        address: connection.1,
+                                        eliminated: false,
+                                        autoplay: false,
+                                        id: rules_frame.player_id,
+                                        name: connect_frame.name,
+                                        hand: Vec::new(),
+                                    });
+                                    rules_frame.player_id += 1;
+                                } else {
+                                    // Failed to send for some reason, maybe they closed the socket?
+                                }
                             }
                         }
                         Err(error) => {
@@ -376,7 +392,7 @@ fn run_lobby(lobby: &mut Lobby, settings: &Settings) {
                         message: String::from("Set to autoplay due to timeout on query"),
                     };
                     let _ = frames::send_frame(&mut queried_player.stream, &autoplay_reason_frame);
-                    lobby.players.get_mut(turn_idx as usize).unwrap().autoplay = true;
+                    lobby.players.get_mut(queried_player_idx as usize).unwrap().autoplay = true;
                     queried_player.autoplay = true;
                 }
             }
@@ -397,6 +413,7 @@ fn run_lobby(lobby: &mut Lobby, settings: &Settings) {
                         message: String::from("Set to autoplay due to not responding to a suggestion"),
                     };
                     let _ = frames::send_frame(&mut queried_player.stream, &autoplay_reason_frame);
+                    lobby.players.get_mut(queried_player_idx as usize).unwrap().autoplay = true;
                     queried_player.autoplay = true;
                 } else {
                     let mut player_holds_card = false;
@@ -412,7 +429,7 @@ fn run_lobby(lobby: &mut Lobby, settings: &Settings) {
                             message: String::from("Set to autoplay due to responding to a suggestion with a not held card"),
                         };
                         let _ = frames::send_frame(&mut queried_player.stream, &autoplay_reason_frame);
-                        lobby.players.get_mut(turn_idx as usize).unwrap().autoplay = true;
+                        lobby.players.get_mut(queried_player_idx as usize).unwrap().autoplay = true;
                         queried_player.autoplay = true;
                     }
 
